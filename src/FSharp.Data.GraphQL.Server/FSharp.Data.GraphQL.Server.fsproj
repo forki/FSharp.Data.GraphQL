@@ -1,15 +1,15 @@
 <Project Sdk="FSharp.NET.Sdk;Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFrameworks>net45;netstandard1.6</TargetFrameworks>
-    <!--<TargetFramework>netstandard1.6</TargetFramework>-->
-    <!--<TargetFramework>net45</TargetFramework>-->
     <PackageTargetFallback>$(PackageTargetFallback);portable-net45+win8+wp8+wpa81;</PackageTargetFallback>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
   </PropertyGroup>
+
   <PropertyGroup Condition=" '$(TargetFramework)' == 'netstandard1.6' ">
     <DefineConstants>$(DefineConstants);NETSTANDARD1_6</DefineConstants>
   </PropertyGroup>
@@ -38,5 +38,6 @@
     <!--<PackageReference Include="FSharp.Control.Reactive" Version="3.*" />-->
     <PackageReference Include="System.Reactive" Version="3.*" />
     <ProjectReference Include="../FSharp.Data.GraphQL.Shared/FSharp.Data.GraphQL.Shared.fsproj" />
+    <ProjectReference Include="../../../FSharp.Data.Dataloader/src/Dataloader.fsproj" />
   </ItemGroup>
 </Project>
