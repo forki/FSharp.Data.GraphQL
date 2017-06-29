@@ -1536,118 +1536,6 @@ and DirectiveDef =
       /// Array of arguments defined within that directive.
       Args : InputFieldDef [] }
 
-and FetchDef = 
-    interface
-        /// GraphQL type definition of the nested type.
-        abstract OfType : TypeDef
-        inherit InputDef
-        inherit OutputDef
-    end
-    
-
-/// Declares a field to be 'Fetchable', meaning that it returns a value of Fetch<'Val>
-/// This means that it will be up to the user to supply caching/batching implementations
-and FetchDef<'Val> = 
-    interface
-        /// GraphQL type definition of the nested type.
-        abstract OfType : TypeDef<'Val>
-        inherit InputDef<Fetch<'Val>>
-        inherit OutputDef<Fetch<'Val>>
-    end
-
-and internal FetchDefinition<'Val> = 
-    { OfType : TypeDef<'Val> }
-    
-    interface TypeDef with
-        member __.Type = typeof<Fetch<'Val >>
-        member x.MakeNullable() = 
-            let nullable : NullableDefinition<_> = { OfType = x }
-            upcast nullable
-        member x.MakeList() = 
-            let list: ListOfDefinition<_,_> = { OfType = x }
-            upcast list
-
-    interface OutputDef
-    interface InputDef
-    
-    interface FetchDef with
-        member x.OfType = upcast x.OfType
-    
-    interface FetchDef<'Val> with
-        member x.OfType = x.OfType
-    
-    override x.ToString() = 
-        match x.OfType with
-        | :? NamedDef as named -> named.Name
-        | :? ListOfDef as list -> list.OfType.ToString()
-        | other -> other.ToString()
-
-and FetchObjectDef = 
-    interface
-        inherit ObjectDef
-    end
-    
-/// GraphQL type definition for an object that is considered to be 'Fetchable'
-and FetchObjectDef<'Val> = 
-    interface
-        /// Collection of fields defined by the current object.
-        abstract Fields : Map<string, FieldDef<Fetch<'Val>>>
-        inherit FetchObjectDef
-        inherit TypeDef<'Val>
-        inherit OutputDef<'Val>
-    end
-
-and [<CustomEquality; NoComparison>] internal FetchObjectDefinition<'Val> = 
-    { /// Name of the object type definition.
-      Name : string
-      /// Optional object definition description.
-      Description : string option
-      /// Lazy resolver for the object fields. It must be lazy in
-      /// order to allow self-recursive type references.
-      FieldsFn : Lazy<Map<string, FieldDef<Fetch<'Val>>>>
-      /// Collection of interfaces implemented by the current object.
-      Implements : InterfaceDef []
-      /// Optional function used to recognize of provided
-      /// .NET object is valid for this GraphQL object definition.
-      IsTypeOf : (obj -> bool) option }
-    
-    interface TypeDef with
-        member __.Type = typeof<'Val>
-        
-        member x.MakeNullable() = 
-            let nullable : NullableDefinition<_> = { OfType = x }
-            upcast nullable
-        
-        member x.MakeList() = 
-            let list: ListOfDefinition<_,_> = { OfType = x }
-            upcast list
-    
-    interface OutputDef
-    
-    interface FetchObjectDef with
-        member x.Name = x.Name
-        member x.Description = x.Description
-        member x.Fields = x.FieldsFn.Force() |> Map.map (fun k v -> upcast v)
-        member x.Implements = x.Implements
-        member x.IsTypeOf = x.IsTypeOf
-    
-    interface FetchObjectDef<'Val> with
-        member x.Fields = x.FieldsFn.Force()
-    
-    interface NamedDef with
-        member x.Name = x.Name
-    
-    override x.Equals y = 
-        match y with
-        | :? FetchObjectDefinition<'Val> as f -> f.Name = x.Name
-        | _ -> false
-    
-    override x.GetHashCode() = 
-        let mutable hash = x.Name.GetHashCode()
-        hash
-    
-    override x.ToString() = x.Name + "!"
-
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Resolve =
     type private Marker = class end
@@ -1720,7 +1608,7 @@ module Resolve =
         match unwrapExpr expr with
         | resolver, FSharpFunc(_,FSharpFunc(d,FSharpFetch(c))) -> 
             resolveUntyped resolver d c runtimeBoxifyFetch
-        | resolver, _ -> failwithf "Unsupported signature for Async Resolve %A"  (resolver.GetType())
+        | resolver, _ -> failwithf "Unsupported signature for Fetch Resolve %A"  (resolver.GetType())
 
     let private boxifyFilterExpr expr: ResolveFieldContext -> obj -> obj -> bool =
         match unwrapExpr expr with
@@ -1842,12 +1730,6 @@ module Patterns =
         | :? NullableDef as x -> Some x.OfType
         | _ -> None
 
-    /// Active pattern to match GraphQL type definition that is considered 'Fetchable'
-    let (|Fetchable|_|) (tdef : TypeDef) = 
-        match tdef with
-        | :? FetchDef as x -> Some x.OfType
-        | _ -> None 
-    
     /// Active pattern to match GraphQL type defintion with non-null types.
     let (|NonNull|_|) (tdef : TypeDef) = 
         match tdef with
@@ -1888,7 +1770,6 @@ module Patterns =
         match tdef with
         | :? NamedDef as n -> Some n
         | Nullable inner -> named inner
-        | Fetchable inner -> named inner
         | List inner -> named inner
         | _ -> None
     
@@ -2141,10 +2022,6 @@ module SchemaDefinitions =
     /// to take option of provided value.
     let Nullable(innerDef : #TypeDef<'Val>) : NullableDef<'Val> = upcast { NullableDefinition.OfType = innerDef }
 
-    /// Wraps a GraphQL type definition, allowing field/argument
-    /// to take a Fetch value
-    let Fetchable(innerDef : #OutputDef<'Val>) : FetchDef<'Val> = upcast { FetchDefinition.OfType = innerDef }
-    
     /// Wraps a GraphQL type definition, allowing defining field/argument 
     /// to take collection of provided value.
     let ListOf(innerDef : #TypeDef<'Val>) : ListOfDef<'Val, 'Seq> = upcast { ListOfDefinition.OfType = innerDef }
@@ -2590,7 +2467,78 @@ module SchemaDefinitions =
                      Args = args |> List.toArray
                      DeprecationReason = Some deprecationReason
                    }
-
+  /// <summary>
+        /// Creates field defined inside object type with asynchronously resolved value.
+        /// </summary>
+        /// <param name="name">Field name. Must be unique in scope of the defining object.</param>
+        /// <param name="typedef">GraphQL type definition of the current field's type.</param>
+        /// <param name="resolve">Expression used to resolve value from defining object.</param>
+        static member FetchField(name : string, typedef : #OutputDef<'Res>, 
+                                 [<ReflectedDefinition(true)>] resolve : Expr<ResolveFieldContext -> 'Val -> Fetch<'Res>>) : FieldDef<'Val> = 
+            upcast { FieldDefinition.Name = name
+                     Description = None
+                     TypeDef = typedef
+                     Resolve = Fetch(typeof<'Val>, typeof<'Res>, resolve)
+                     Args = [||]
+                     DeprecationReason = None
+                      }
+        
+        /// <summary>
+        /// Creates field defined inside object type with asynchronously resolved value.
+        /// </summary>
+        /// <param name="name">Field name. Must be unique in scope of the defining object.</param>
+        /// <param name="typedef">GraphQL type definition of the current field's type.</param>
+        /// <param name="description">Optional field description. Usefull for generating documentation.</param>
+        /// <param name="resolve">Expression used to resolve value from defining object.</param>
+        static member FetchField(name : string, typedef : #OutputDef<'Res>, description : string, 
+                                 [<ReflectedDefinition(true)>] resolve : Expr<ResolveFieldContext -> 'Val -> Fetch<'Res>>) : FieldDef<'Val> = 
+            upcast { FieldDefinition.Name = name
+                     Description = Some description
+                     TypeDef = typedef
+                     Resolve = Fetch(typeof<'Val>, typeof<'Res>, resolve)
+                     Args = [||]
+                     DeprecationReason = None
+                      }
+        
+        /// <summary>
+        /// Creates field defined inside object type with asynchronously resolved value.
+        /// </summary>
+        /// <param name="name">Field name. Must be unique in scope of the defining object.</param>
+        /// <param name="typedef">GraphQL type definition of the current field's type.</param>
+        /// <param name="description">Optional field description. Usefull for generating documentation.</param>
+        /// <param name="args">List of field arguments used to parametrize resolve expression output.</param>
+        /// <param name="resolve">Expression used to resolve value from defining object.</param>
+        static member FetchField(name : string, typedef : #OutputDef<'Res>, description : string, 
+                                 args : InputFieldDef list, 
+                                 [<ReflectedDefinition(true)>] resolve : Expr<ResolveFieldContext -> 'Val -> Fetch<'Res>>) : FieldDef<'Val> = 
+            upcast { FieldDefinition.Name = name
+                     Description = Some description
+                     TypeDef = typedef
+                     Resolve = Fetch(typeof<'Val>, typeof<'Res>, resolve)
+                     Args = args |> List.toArray
+                     DeprecationReason = None
+                     }
+        
+        /// <summary>
+        /// Creates field defined inside object type with asynchronously resolved value. Fields is marked as deprecated.
+        /// </summary>
+        /// <param name="name">Field name. Must be unique in scope of the defining object.</param>
+        /// <param name="typedef">GraphQL type definition of the current field's type.</param>
+        /// <param name="description">Optional field description. Usefull for generating documentation.</param>
+        /// <param name="args">List of field arguments used to parametrize resolve expression output.</param>
+        /// <param name="resolve">Expression used to resolve value from defining object.</param>
+        /// <param name="deprecationReason">Deprecation reason.</param>
+        static member FetchField(name : string, typedef : #OutputDef<'Res>, description : string, 
+                                 args : InputFieldDef list, 
+                                 [<ReflectedDefinition(true)>] resolve : Expr<ResolveFieldContext -> 'Val -> Fetch<'Res>>, 
+                                 deprecationReason : string) : FieldDef<'Val> = 
+            upcast { FieldDefinition.Name = name
+                     Description = Some description
+                     TypeDef = typedef
+                     Resolve = Fetch(typeof<'Val>, typeof<'Res>, resolve)
+                     Args = args |> List.toArray
+                     DeprecationReason = Some deprecationReason
+                   }
         static member CustomField(name : string, [<ReflectedDefinition(true)>] execField : Expr<ExecuteField>) : FieldDef<'Val> = 
             upcast { FieldDefinition.Name = name
                      Description = None

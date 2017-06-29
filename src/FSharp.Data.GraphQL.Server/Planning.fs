@@ -170,9 +170,6 @@ let rec private plan (ctx: PlanningContext) (stage:PlanningStage): PlanningStage
     | Nullable returnDef -> 
         let inner, deferredFields', path' = plan ctx ({ info with ParentDef = info.ReturnDef; ReturnDef = downcast returnDef }, deferredFields, path)
         { inner with IsNullable = true}, deferredFields', path'
-    | Fetchable returnDef ->
-        let inner, deferredFields', path' = plan ctx ({ info with ParentDef = info.ReturnDef; ReturnDef = downcast returnDef }, deferredFields, path)
-        { inner with IsNullable = true}, deferredFields', path'
     | List returnDef -> 
         // We dont yet know the indicies of our elements so we append a dummy value on
         let inner, deferredFields', path' = plan ctx ({ info with ParentDef = info.ReturnDef; ReturnDef = downcast returnDef; Identifier = "__index" }, deferredFields, info.Identifier::path)

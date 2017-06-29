@@ -413,8 +413,6 @@ let rec private buildResolverTree (returnDef: OutputDef) (ctx: ResolveFieldConte
             | _ -> ResolverError { Name = name; Message = ctx.Schema.ParseError <| GraphQLException (sprintf "Expected to have enumerable value in field '%s' but got '%O'" ctx.ExecutionInfo.Identifier (value.GetType())); PathToOrigin = [] } |> Fetch.lift)
     | Nullable (Output innerdef) ->
         buildResolverTree innerdef ctx fieldExecuteMap fetch 
-    | Fetchable (Output innerdef) ->
-        buildResolverTree innerdef ctx fieldExecuteMap fetch 
     | Interface idef ->
         let possibleTypesFn = ctx.Schema.GetPossibleTypes
         let resolver = resolveInterfaceType possibleTypesFn idef

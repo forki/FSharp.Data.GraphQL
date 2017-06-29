@@ -84,9 +84,9 @@ module GlobalId =
                     resolve ctx value id)
 
         static member FetchNodeField (nodeDef: InterfaceDef<'Res>, resolve: (ResolveFieldContext -> 'Val -> string -> Fetch<'Res option>)) =
-            Define.Field(
+            Define.FetchField(
                 name = "node",
-                typedef = Fetchable(Nullable nodeDef),
+                typedef = Nullable nodeDef,
                 description = "Fetches an object given its ID",
                 args = [ Define.Input("id", ID, description = "Identifier of an object") ],
                 resolve = fun ctx value -> 

@@ -207,7 +207,7 @@ let Query =
   Define.Object<Root>(
     name = "Query",
     fields = [
-        Define.Field("hero", Fetchable(Nullable HumanType), "Gets human hero", [ Define.Input("id", String) ], fun ctx _ -> getHero (ctx.Arg("id")))
+        Define.FetchField("hero", Nullable HumanType, "Gets human hero", [ Define.Input("id", String) ], fun ctx _ -> getHero (ctx.Arg("id")))
         Define.Field("droid", Nullable DroidType, "Gets droid", [ Define.Input("id", String) ], fun ctx _ -> getDroid (ctx.Arg("id"))) ])
 let Mutation =
     Define.Object<Root>(
