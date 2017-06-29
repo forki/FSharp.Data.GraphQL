@@ -103,8 +103,33 @@ let getCharacter id = characters |> List.tryFind (matchesId id)
 open FSharp.Data.GraphQL
 open FSharp.Data.GraphQL.Types
 open FSharp.Data.GraphQL.Execution
+open FSharp.Data.Dataloader
 
 let schemaConfig = { SchemaConfig.Default with ParseError = (fun e -> e.Message + "\r\n" + e.StackTrace) }
+
+type TestRequest =
+    | HeroRequest of string
+    interface Request with
+        member x.Identifier =
+            match x with
+            | HeroRequest id -> sprintf "Hero id = " + id
+
+type TestDataSource () =
+    interface DataSource<TestRequest> with
+        member x.Name = "TestDataSource"
+        member x.FetchFn(blocked) =
+            blocked
+            |> List.map(fun b ->
+                match b.Request with
+                | HeroRequest id ->
+                    async {
+                        let res = getHuman id
+                        b.Status := FetchSuccess(box res)
+                    })
+            |> Async.Parallel
+            |> AsyncFetch
+let dataSource = TestDataSource()
+let getHero id = Fetch.dataFetch<Human option, TestRequest> dataSource (HeroRequest(id))
 
 let EpisodeType =
   Define.Enum(
@@ -182,7 +207,7 @@ let Query =
   Define.Object<Root>(
     name = "Query",
     fields = [
-        Define.Field("hero", Nullable HumanType, "Gets human hero", [ Define.Input("id", String) ], fun ctx _ -> getHuman (ctx.Arg("id")))
+        Define.Field("hero", Fetchable(Nullable HumanType), "Gets human hero", [ Define.Input("id", String) ], fun ctx _ -> getHero (ctx.Arg("id")))
         Define.Field("droid", Nullable DroidType, "Gets droid", [ Define.Input("id", String) ], fun ctx _ -> getDroid (ctx.Arg("id"))) ])
 let Mutation =
     Define.Object<Root>(

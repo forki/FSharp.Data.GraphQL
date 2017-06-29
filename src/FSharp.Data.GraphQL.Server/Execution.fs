@@ -18,6 +18,7 @@ open FSharp.Data.GraphQL.Introspection
 open FSharp.Quotations
 open FSharp.Quotations.Patterns
 open FSharp.Reflection.FSharpReflectionExtensions
+open FSharp.Reflection
 open FSharp.Data.Dataloader
 
 type Error = string * string list
@@ -216,6 +217,18 @@ let private isOption (value: obj) =
             Some(v'.GetValue(value, [| |]))
         else None
 
+type Invoker private () = 
+    static member Call(unfetch: obj, env: Environment, resultType: Type): Result<obj> =
+        let flags = BindingFlags.NonPublic ||| BindingFlags.Static
+        let methodInfo = (typeof<Invoker>).GetMethod("DowncastFetch", flags)
+        methodInfo.MakeGenericMethod(resultType).Invoke(null, [|unfetch; env|]) :?> Result<obj>
+
+    static member private DowncastFetch<'a> (unfetch: Environment -> Result<'a>, env: Environment): Result<obj> =
+        match unfetch env with
+        | Done a -> Done(box a)
+        | Blocked(br, f) -> Blocked(br, { Fetch.unFetch = fun env -> Invoker.DowncastFetch(f.unFetch, env) })
+        | FailedWith exn -> FailedWith exn
+
 let private isFetch (value: obj) =
     let fetchDef = typedefof<Fetch<_>>
     if isNull value then None
@@ -226,7 +239,9 @@ let private isFetch (value: obj) =
 #else       
         if t.IsGenericType && t.GetGenericTypeDefinition() = fetchDef then
 #endif                  
-            Some(value :?> Fetch<obj>)
+            let innerType = t.GetGenericArguments().[0]
+            let unfetch = FSharpValue.GetRecordFields(value).[0]
+            Some({Fetch.unFetch = fun env -> Invoker.Call(unfetch, env, innerType)})
         else None
 
 let private (|SomeObj|_|) = isOption

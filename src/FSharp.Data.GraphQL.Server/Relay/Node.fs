@@ -7,6 +7,7 @@ open System
 open System.Reflection
 open FSharp.Data.GraphQL
 open FSharp.Data.GraphQL.Types
+open FSharp.Data.Dataloader
 
 [<AutoOpen>]
 module GlobalId =
