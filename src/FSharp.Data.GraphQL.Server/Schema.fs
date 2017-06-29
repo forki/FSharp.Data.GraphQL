@@ -97,6 +97,7 @@ type Schema<'Root> (query: ObjectDef<'Root>, ?mutation: ObjectDef<'Root>, ?subsc
             |> Array.fold insert ns'
         | List (Named innerdef) -> insert ns innerdef 
         | Nullable (Named innerdef) -> insert ns innerdef
+        | Fetchable (Named innerdef) -> insert ns innerdef
         | InputObject objdef -> 
             let ns' = addOrReturn objdef.Name typedef ns
             objdef.Fields
@@ -154,9 +155,9 @@ type Schema<'Root> (query: ObjectDef<'Root>, ?mutation: ObjectDef<'Root>, ?subsc
     let rec introspectTypeRef isNullable (namedTypes: Map<string, IntrospectionTypeRef>) typedef =
         match typedef with
         | Nullable inner -> introspectTypeRef true namedTypes inner
+        | Fetchable inner -> introspectTypeRef true namedTypes inner
         | List inner -> 
-            if isNullable 
-            then IntrospectionTypeRef.List(introspectTypeRef false namedTypes inner)
+            if isNullable then IntrospectionTypeRef.List(introspectTypeRef false namedTypes inner)
             else IntrospectionTypeRef.NonNull(introspectTypeRef true namedTypes typedef)
         | Named named -> 
             if isNullable
@@ -275,7 +276,7 @@ type Schema<'Root> (query: ObjectDef<'Root>, ?mutation: ObjectDef<'Root>, ?subsc
         let ischema =
             { QueryType = Map.find query.Name inamed
               MutationType = mutation |> Option.map (fun m -> Map.find m.Name inamed)
-              SubscriptionType = None // not supported yet
+              SubscriptionType = subscription |> Option.map(fun s -> Map.find s.Name inamed)
               Types = itypes
               Directives = idirectives }
         ischema

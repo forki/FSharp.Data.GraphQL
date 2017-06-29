@@ -8,6 +8,7 @@ open FSharp.Data.GraphQL.Ast
 open FSharp.Data.GraphQL.Parser
 open FSharp.Data.GraphQL.Types.Patterns
 open FSharp.Data.GraphQL.Planning
+open FSharp.Data.Dataloader
 
 
 type Executor<'Root> (schema: ISchema<'Root>) = 
@@ -19,15 +20,15 @@ type Executor<'Root> (schema: ISchema<'Root>) =
     //     we don't need to know possible types at this point
         fieldExecuteMap.SetExecute("",
                                    "__schema",
-                                   compileField SchemaMetaFieldDef)
+                                   compileField SchemaMetaFieldDef "__schema")
 
         fieldExecuteMap.SetExecute("",
                                    "__type",
-                                   compileField TypeMetaFieldDef )
+                                   compileField TypeMetaFieldDef "__type")
 
         fieldExecuteMap.SetExecute("",
                                    "__typename",
-                                   compileField TypeNameMetaFieldDef )
+                                   compileField TypeNameMetaFieldDef "__typename")
 
     do
         compileSchema schema.TypeMap fieldExecuteMap schema.SubscriptionProvider
@@ -52,8 +53,8 @@ type Executor<'Root> (schema: ISchema<'Root>) =
             try
                 let errors = System.Collections.Concurrent.ConcurrentBag<exn>()
                 let rootObj = data |> Option.map box |> Option.toObj
-                let! res = evaluate schema executionPlan variables rootObj errors fieldExecuteMap
-                return prepareOutput res
+                let res = evaluate schema executionPlan variables rootObj errors fieldExecuteMap
+                return res |> Fetch.map(prepareOutput) |> Fetch.runFetch true
             with 
             | ex -> 
                 let msg = ex.ToString()

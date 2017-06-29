@@ -13,6 +13,7 @@ open FSharp.Quotations
 open FSharp.Quotations.Patterns
 open FSharp.Reflection
 open FSharp.Linq.RuntimeHelpers
+open FSharp.Data.Dataloader
 
 /// Enum describing parts of the GraphQL query document AST, where 
 /// related directive is valid to be used.
@@ -588,6 +589,12 @@ and Resolve =
     /// expr is untyped version of Expr<ResolveFieldContext->'Input->Async<'Output>>
     | Async of input:Type * output:Type * expr:Expr 
 
+    /// Resolves field value as part of a Fetch computation
+    /// input defines .NET type of the provided object
+    /// output defines .NET type of the returned value
+    /// expr is untyped version of Expr<ResolveFieldContext->'Input->Fetch<'Output>>
+    | Fetch of input: Type * output: Type * expr:Expr
+
     /// Resolves the filter function of a subscription.
     /// root defines the .NET type of the root object
     /// input defines the .NET type of the value being subscribed to
@@ -700,7 +707,7 @@ and ResolveFieldContext =
         | None -> raise (System.Collections.Generic.KeyNotFoundException(sprintf "Argument '%s' was not provided within context of a field '%s'. Check if it was supplied within GraphQL query." name x.ExecutionInfo.Identifier))
 
 /// Function type for the compiled field executor.
-and ExecuteField = ResolveFieldContext -> obj -> AsyncVal<obj>
+and ExecuteField = ResolveFieldContext -> obj -> Fetch<obj>
 
 /// Untyped representation of the GraphQL field defintion.
 /// Can be used only withing object and interface definitions.
@@ -1529,6 +1536,118 @@ and DirectiveDef =
       /// Array of arguments defined within that directive.
       Args : InputFieldDef [] }
 
+and FetchDef = 
+    interface
+        /// GraphQL type definition of the nested type.
+        abstract OfType : TypeDef
+        inherit InputDef
+        inherit OutputDef
+    end
+    
+
+/// Declares a field to be 'Fetchable', meaning that it returns a value of Fetch<'Val>
+/// This means that it will be up to the user to supply caching/batching implementations
+and FetchDef<'Val> = 
+    interface
+        /// GraphQL type definition of the nested type.
+        abstract OfType : TypeDef<'Val>
+        inherit InputDef<Fetch<'Val>>
+        inherit OutputDef<Fetch<'Val>>
+    end
+
+and internal FetchDefinition<'Val> = 
+    { OfType : TypeDef<'Val> }
+    
+    interface TypeDef with
+        member __.Type = typeof<Fetch<'Val >>
+        member x.MakeNullable() = 
+            let nullable : NullableDefinition<_> = { OfType = x }
+            upcast nullable
+        member x.MakeList() = 
+            let list: ListOfDefinition<_,_> = { OfType = x }
+            upcast list
+
+    interface OutputDef
+    interface InputDef
+    
+    interface FetchDef with
+        member x.OfType = upcast x.OfType
+    
+    interface FetchDef<'Val> with
+        member x.OfType = x.OfType
+    
+    override x.ToString() = 
+        match x.OfType with
+        | :? NamedDef as named -> named.Name
+        | :? ListOfDef as list -> list.OfType.ToString()
+        | other -> other.ToString()
+
+and FetchObjectDef = 
+    interface
+        inherit ObjectDef
+    end
+    
+/// GraphQL type definition for an object that is considered to be 'Fetchable'
+and FetchObjectDef<'Val> = 
+    interface
+        /// Collection of fields defined by the current object.
+        abstract Fields : Map<string, FieldDef<Fetch<'Val>>>
+        inherit FetchObjectDef
+        inherit TypeDef<'Val>
+        inherit OutputDef<'Val>
+    end
+
+and [<CustomEquality; NoComparison>] internal FetchObjectDefinition<'Val> = 
+    { /// Name of the object type definition.
+      Name : string
+      /// Optional object definition description.
+      Description : string option
+      /// Lazy resolver for the object fields. It must be lazy in
+      /// order to allow self-recursive type references.
+      FieldsFn : Lazy<Map<string, FieldDef<Fetch<'Val>>>>
+      /// Collection of interfaces implemented by the current object.
+      Implements : InterfaceDef []
+      /// Optional function used to recognize of provided
+      /// .NET object is valid for this GraphQL object definition.
+      IsTypeOf : (obj -> bool) option }
+    
+    interface TypeDef with
+        member __.Type = typeof<'Val>
+        
+        member x.MakeNullable() = 
+            let nullable : NullableDefinition<_> = { OfType = x }
+            upcast nullable
+        
+        member x.MakeList() = 
+            let list: ListOfDefinition<_,_> = { OfType = x }
+            upcast list
+    
+    interface OutputDef
+    
+    interface FetchObjectDef with
+        member x.Name = x.Name
+        member x.Description = x.Description
+        member x.Fields = x.FieldsFn.Force() |> Map.map (fun k v -> upcast v)
+        member x.Implements = x.Implements
+        member x.IsTypeOf = x.IsTypeOf
+    
+    interface FetchObjectDef<'Val> with
+        member x.Fields = x.FieldsFn.Force()
+    
+    interface NamedDef with
+        member x.Name = x.Name
+    
+    override x.Equals y = 
+        match y with
+        | :? FetchObjectDefinition<'Val> as f -> f.Name = x.Name
+        | _ -> false
+    
+    override x.GetHashCode() = 
+        let mutable hash = x.Name.GetHashCode()
+        hash
+    
+    override x.ToString() = x.Name + "!"
+
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Resolve =
     type private Marker = class end
@@ -1543,6 +1662,11 @@ module Resolve =
         if typ.GetTypeInfo().IsGenericType && typ.GetGenericTypeDefinition() = typedefof<Async<_>> then
             Some(typ.GenericTypeArguments |> Array.head)
         else None
+    
+    let private (|FSharpFetch|_|) (typ: Type) =
+        if typ.GetTypeInfo().IsGenericType && typ.GetGenericTypeDefinition() = typedefof<Fetch<_>> then
+            Some(typ.GenericTypeArguments |> Array.head)
+        else None
         
     let private boxify<'T,'U>(f:ResolveFieldContext -> 'T -> 'U) : ResolveFieldContext -> obj -> obj =
         <@@ fun ctx (x:obj) -> f ctx (x :?> 'T)  |> box  @@>
@@ -1551,6 +1675,11 @@ module Resolve =
 
     let private boxifyAsync<'T, 'U>(f:ResolveFieldContext -> 'T -> Async<'U>): ResolveFieldContext -> obj -> Async<obj> =
         <@@ fun ctx (x:obj) -> async.Bind(f ctx (x :?> 'T), async.Return << box)  @@>
+        |> LeafExpressionConverter.EvaluateQuotation
+        |> unbox
+    
+    let private boxifyFetch<'T, 'U>(f: ResolveFieldContext -> 'T -> Fetch<'U>): ResolveFieldContext -> obj -> Fetch<obj> =
+        <@@ fun ctx (x: obj) -> (f ctx (x :?> 'T)) |> Fetch.map(box)@@>
         |> LeafExpressionConverter.EvaluateQuotation
         |> unbox
     let private boxifyFilter<'Root, 'Input>(f:ResolveFieldContext -> 'Root -> 'Input -> bool): ResolveFieldContext -> obj -> obj -> bool =
@@ -1562,9 +1691,10 @@ module Resolve =
         methods |> Seq.find (fun m -> m.Name.Equals name)
         
     let private runtimeBoxify = getRuntimeMethod "boxify"
-    
     let private runtimeBoxifyAsync = getRuntimeMethod "boxifyAsync"
+    let private runtimeBoxifyFetch = getRuntimeMethod "boxifyFetch"
     let private runtimeBoxifyFilter = getRuntimeMethod "boxifyFilter"
+
 
     let private unwrapExpr = function
         | WithValue(resolver, _, _) -> (resolver, resolver.GetType())
@@ -1585,11 +1715,19 @@ module Resolve =
         | resolver, FSharpFunc(_,FSharpFunc(d,FSharpAsync(c))) -> 
             resolveUntyped resolver d c runtimeBoxifyAsync
         | resolver, _ -> failwithf "Unsupported signature for Async Resolve %A"  (resolver.GetType())
+    
+    let private boxifyExprFetch expr : ResolveFieldContext -> obj -> Fetch<obj> =
+        match unwrapExpr expr with
+        | resolver, FSharpFunc(_,FSharpFunc(d,FSharpFetch(c))) -> 
+            resolveUntyped resolver d c runtimeBoxifyFetch
+        | resolver, _ -> failwithf "Unsupported signature for Async Resolve %A"  (resolver.GetType())
+
     let private boxifyFilterExpr expr: ResolveFieldContext -> obj -> obj -> bool =
         match unwrapExpr expr with
         | resolver, FSharpFunc(_,FSharpFunc(r,FSharpFunc(i,_))) ->
             resolveUntyped resolver r i runtimeBoxifyFilter
         | resolver, _ -> failwithf "Unsupported signature for Subscription Filter Resolve %A"  (resolver.GetType()) 
+
     let (|BoxedSync|_|) = function 
         | Sync(d,c,expr) -> Some(d,c,boxifyExpr expr)
         | _ -> None
@@ -1601,6 +1739,10 @@ module Resolve =
     let (|BoxedExpr|_|) = function
         | ResolveExpr(e) -> Some(boxifyExpr e)
         | _ -> None 
+    
+    let (|BoxedFetch|_|) = function
+        | Fetch(d,c,expr) -> Some(d,c,boxifyExprFetch expr)
+        | _ -> None
 
     let (|BoxedFilterExpr|_|) = function
         | Filter(r,i,expr) -> Some(r,i, boxifyFilterExpr expr)
@@ -1699,6 +1841,12 @@ module Patterns =
         match tdef with
         | :? NullableDef as x -> Some x.OfType
         | _ -> None
+
+    /// Active pattern to match GraphQL type definition that is considered 'Fetchable'
+    let (|Fetchable|_|) (tdef : TypeDef) = 
+        match tdef with
+        | :? FetchDef as x -> Some x.OfType
+        | _ -> None 
     
     /// Active pattern to match GraphQL type defintion with non-null types.
     let (|NonNull|_|) (tdef : TypeDef) = 
@@ -1740,6 +1888,7 @@ module Patterns =
         match tdef with
         | :? NamedDef as n -> Some n
         | Nullable inner -> named inner
+        | Fetchable inner -> named inner
         | List inner -> named inner
         | _ -> None
     
@@ -1991,6 +2140,10 @@ module SchemaDefinitions =
     /// Wraps a GraphQL type definition, allowing defining field/argument 
     /// to take option of provided value.
     let Nullable(innerDef : #TypeDef<'Val>) : NullableDef<'Val> = upcast { NullableDefinition.OfType = innerDef }
+
+    /// Wraps a GraphQL type definition, allowing field/argument
+    /// to take a Fetch value
+    let Fetchable(innerDef : #OutputDef<'Val>) : FetchDef<'Val> = upcast { FetchDefinition.OfType = innerDef }
     
     /// Wraps a GraphQL type definition, allowing defining field/argument 
     /// to take collection of provided value.

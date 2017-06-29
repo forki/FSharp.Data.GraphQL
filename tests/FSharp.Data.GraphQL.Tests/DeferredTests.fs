@@ -192,8 +192,77 @@ let ``List Union Defer``() =
     | Deferred(data, errors, deferred) ->
         empty errors
         data.["data"] |> equals (upcast expectedDirect)
-        // deferred |> Observable.add(printfn "Deferred: %A")
+        deferred |> Observable.add(printfn "Deferred: %A")
     | _ -> fail "Expected Deferred GQLRespnse"
+
+type CaseA = {
+    id: string
+    a: string
+    unions: NestedUnion list
+}
+
+and CaseB = {
+    id: string
+    b: string
+    unions: NestedUnion list
+}
+
+and NestedUnion =
+    | A' of CaseA
+    | B' of CaseB
+
+// let ``Nested Union List`` () =
+//     let ast = parse"""{
+//         testData {
+//             id
+//             unions {
+//                 ... on CaseA {
+//                     id
+//                 }
+//                 ... on CaseB {
+//                     id
+//                     unions {
+//                         ... on CaseA {
+//                             id
+//                             a @defer
+//                         }
+//                         ... on CaseB {
+//                             id
+//                             b @defer
+//                         }
+//                     }
+//                 }
+//             }
+//         }
+//     }"""
+
+//     let CaseAType =
+//         Define.Object<CaseA>(
+//             "A", [
+//                 Define.Field("id", String, (fun _ a -> a.id))
+//                 Define.Field("a", String (fun _ a -> a.a))
+//                 // Define.Field("unions",)
+//             ])
+//     and CaseBType =
+//         Define.Object<CaseB>(
+//             "B", [
+//                 Define.Field("id", String, (fun _ b -> b.id))
+//                 Define.Field("b", String, (fun _ b -> b.b))
+//             ])
+//     and NestedUnionType =
+//         Define.Union(
+//             name = "NestedUnion",
+//             options = [ CaseAType; CaseBType ],
+//             resolveValue = (fun u ->
+//                 match u with
+//                 | CaseA a -> a :> obj
+//                 | CaseB b -> b :> obj),
+//             resolveType = (fun u ->
+//                 match u with
+//                 | CaseA _ -> CaseAType
+                
+//             )
+//         )
 
 [<Fact>]
 let ``Complex Defer`` () =

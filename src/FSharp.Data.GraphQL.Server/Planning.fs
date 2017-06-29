@@ -172,9 +172,9 @@ let rec private plan (ctx: PlanningContext) (stage:PlanningStage): PlanningStage
         { inner with IsNullable = true}, deferredFields', path'
     | List returnDef -> 
         // We dont yet know the indicies of our elements so we append a dummy value on
-        let inner, deferredFields', path' = plan ctx ({ info with ParentDef = info.ReturnDef; ReturnDef = downcast returnDef; Identifier = "__index" }, deferredFields, "__index"::info.Identifier::path)
+        let inner, deferredFields', path' = plan ctx ({ info with ParentDef = info.ReturnDef; ReturnDef = downcast returnDef; Identifier = "__index" }, deferredFields, info.Identifier::path)
         { info with Kind = ResolveCollection inner }, deferredFields', path'
-    | Abstract _ -> planAbstraction ctx info.Ast.SelectionSet (info, deferredFields, path) (ref []) None 
+    | Abstract _ -> planAbstraction ctx info.Ast.SelectionSet (info, deferredFields, info.Identifier::path) (ref []) None 
     | _ -> failwith "Invalid Return Type in Planning!"
 
 and private planSelection (ctx: PlanningContext) (selectionSet: Selection list) (stage: PlanningStage) visitedFragments : PlanningStage = 
@@ -195,9 +195,9 @@ and private planSelection (ctx: PlanningContext) (selectionSet: Selection list) 
                     let innerInfo = objectInfo(ctx, parentDef, field, includer)
                     let executionPlan, deferredFields', path' = plan ctx (innerInfo, deferredFields, path)
                     if isDeferredField field
-                    then (fields, {Info = {info with Kind = SelectFields [executionPlan]}; Path = path'}::deferredFields')
+                    then 
+                        (fields, {Info = {info with Kind = SelectFields [executionPlan]}; Path = path'}::deferredFields')
                     else (fields @ [executionPlan], deferredFields')    // unfortunatelly, order matters here
-                    
             | FragmentSpread spread ->
                 let spreadName = spread.Name
                 if !visitedFragments |> List.exists (fun name -> name = spreadName) 
@@ -241,8 +241,6 @@ and private planAbstraction (ctx:PlanningContext) (selectionSet: Selection list)
                 let infoMap, deferredFields', path' = Map.fold (foldPlan) (Map.empty, deferredFields, []) a  
                 if isDeferredField field
                 then 
-                    printfn "Abstraction Info Keys: %A" (a |> Map.toSeq |> Seq.map fst)
-                    printfn "InfoMap Keys: %A" (infoMap |> Map.toSeq |> Seq.map fst)
                     fields, {Info = { innerData with Kind = ResolveAbstraction infoMap}; Path = path'}::deferredFields'
                 else Map.merge (fun _ oldVal newVal -> oldVal @ newVal) fields infoMap, deferredFields'
             | FragmentSpread spread ->
@@ -263,6 +261,7 @@ and private planAbstraction (ctx:PlanningContext) (selectionSet: Selection list)
                 // retrieve fragment data just as it was normal selection set
                 let fragmentInfo, deferredFields', path' = planAbstraction ctx fragment.SelectionSet (innerData, deferredFields, path) visitedFragments fragment.TypeCondition
                 let fragmentFields = getAbstractionFrag fragmentInfo.Kind
+                // printfn "Deferred Fields List: %A" (deferredFields' |> List.map(fun d -> d.Info.Identifier))
 
                 // filter out already existing fields
                 Map.merge (fun _ oldVal newVal -> oldVal @ newVal) fields fragmentFields, deferredFields'

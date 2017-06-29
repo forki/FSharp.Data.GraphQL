@@ -70,6 +70,17 @@ module GlobalId =
                 resolve = fun ctx value -> 
                     let id = ctx.Arg("id")
                     resolve ctx value id)
+
+
+        static member AsyncNodeField (nodeDef: InterfaceDef<'Res>, resolve: (ResolveFieldContext -> 'Val -> string -> Async<'Res option>)) =
+            Define.AsyncField(
+                name = "node",
+                typedef = Nullable nodeDef,
+                description = "Fetches an object given its ID",
+                args = [ Define.Input("id", ID, description = "Identifier of an object") ],
+                resolve = fun ctx value -> 
+                    let id = ctx.Arg("id")
+                    resolve ctx value id)
                     
         /// Field definition for the Relay Node interface. Node interfaces are used
         /// by Relay to identify uniqe components - they need to implement and `id`

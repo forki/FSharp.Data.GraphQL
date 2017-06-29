@@ -1,4 +1,4 @@
-
+module GraphiQL
 #nowarn "40"
 
 open System
@@ -104,7 +104,7 @@ open FSharp.Data.GraphQL
 open FSharp.Data.GraphQL.Types
 open FSharp.Data.GraphQL.Execution
 
-let schemaConfig = SchemaConfig.Default
+let schemaConfig = { SchemaConfig.Default with ParseError = (fun e -> e.Message + "\r\n" + e.StackTrace) }
 
 let EpisodeType =
   Define.Enum(
@@ -122,8 +122,8 @@ let rec CharacterType =
     options = [ HumanType; DroidType ],
     resolveValue = (fun o ->
         match o with
-        | Human h -> box h
-        | Droid d -> upcast d),
+        | Human h -> h :> obj
+        | Droid d -> d :> obj),
     resolveType = (fun o ->
         match o with
         | Human _ -> upcast HumanType
@@ -144,7 +144,7 @@ and HumanType : ObjectDef<Human> =
                 |> List.toSeq)
         Define.Field("appearsIn", ListOf EpisodeType, "Which movies they appear in.", fun _ h -> h.AppearsIn)
         Define.Field("justFuckMyShitUp", String, "Failure Guarunteed!", fun _ h -> failwith "Why did you call me???")
-        Define.Field("justFuckMyListUp", ListOf String, "List with nulls, oh my!", fun _ h -> ["1";"2";null] )
+        Define.Field("justFuckMyListUp", Nullable(ListOf String), "List with nulls, oh my!", fun _ h -> Some ["1";"2";null] )
         Define.Field("justFuckMyObjectUp", HumanType, "A null human, how scary!", fun _ h -> failwith "You adopted the null... I was born into it, molded by it")
         Define.Field("bigGuy", DroidType, "OF COURSE", fun _ h -> {Id = null; Name =  Some "Bane"; Friends = []; AppearsIn = []; PrimaryFunction = Some "Crashing this code... with no survivors"; })
         Define.Field("homePlanet", Nullable String, "The home planet of the human, or null if unknown.", fun _ h -> h.HomePlanet) ])

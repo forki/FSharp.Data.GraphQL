@@ -10,14 +10,14 @@ open System.Collections.Generic
 type AsyncVal<'T> =
     | Value of 'T
     | Async of Async<'T>
-    | Failure of Exception
+    | FailedWith of Exception
 
     static member Zero = Value(Unchecked.defaultof<'T>)
     override x.ToString () = 
         match x with
         | Value v -> "AsyncVal(" + v.ToString() + ")"
         | Async a -> "AsyncVal(Async<>)"
-        | Failure f -> "AsyncVal(Failure:" + f.Message + ")"
+        | FailedWith f -> "AsyncVal(Failure:" + f.Message + ")"
     
 [<RequireQualifiedAccess>]
 module AsyncVal =
@@ -29,7 +29,7 @@ module AsyncVal =
     let inline isSync (x: AsyncVal<'T>) = match x with | Value _ -> true | _ -> false
 
     /// Returns true if the AsyncVal failed, otherwise false
-    let inline isFailure (x: AsyncVal<'T>) = match x with | Failure _ -> true | _ -> false
+    let inline isFailure (x: AsyncVal<'T>) = match x with | FailedWith _ -> true | _ -> false
 
     /// Returns value wrapped by current AsyncVal. If it's part of Async computation,
     /// it's executed synchronously and then value is returned.
@@ -38,7 +38,7 @@ module AsyncVal =
         match x with
         | Value v -> v
         | Async a -> a |> Async.RunSynchronously
-        | Failure f -> raise f
+        | FailedWith f -> raise f
 
     /// Create new AsyncVal from Async computation.
     let inline ofAsync (a: Async<'T>) = Async(a)
@@ -51,7 +51,7 @@ module AsyncVal =
         match x with
         | Value v -> async.Return v
         | Async a -> a
-        | Failure f -> async.Return (raise f)
+        | FailedWith f -> async.Return (raise f)
 
     /// Returns an empty AsyncVal with immediatelly executed value.
     let inline empty<'T> : AsyncVal<'T> = AsyncVal<'T>.Zero
@@ -66,7 +66,7 @@ module AsyncVal =
                 let! result = a
                 return fn result
             })
-        | Failure f -> Failure(f)
+        | FailedWith f -> FailedWith(f)
 
 
     /// Applies rescue fn in case when contained Async value throws an exception.
@@ -78,7 +78,7 @@ module AsyncVal =
                 try return! a
                 with e -> return fn e
             })
-        | Failure f -> Value(fn f)
+        | FailedWith f -> Value(fn f)
 
 
     /// Folds content of AsyncVal over provided initial state zero using provided fn.
@@ -91,7 +91,7 @@ module AsyncVal =
                 let! res = a
                 return fn zero res
             })
-        | Failure f -> Failure(f)
+        | FailedWith f -> FailedWith(f)
 
 
     /// Binds AsyncVal using binder function to produce new AsyncVal.
@@ -105,9 +105,9 @@ module AsyncVal =
                 match bound with
                 | Value v -> return v
                 | Async a -> return! a
-                | Failure f -> return raise f
+                | FailedWith f -> return raise f
             })
-        | Failure f -> Failure(f)
+        | FailedWith f -> FailedWith(f)
             
     /// Converts array of AsyncVals into AsyncVal with array results.
     /// In case when are non-immediate values in provided array, they are 
@@ -126,7 +126,7 @@ module AsyncVal =
                     | Async a ->
                         let! r = a
                         results.[i] <- r
-                    | Failure f -> 
+                    | FailedWith f -> 
                         results.[i] <- raise f
                 return results })
         else Value (values |> Array.map (fun (Value v) -> v))
@@ -151,7 +151,7 @@ module AsyncVal =
                 | Async a ->
                     indexes.Add i
                     continuations.Add a
-                | Failure f ->
+                | FailedWith f ->
                     results.[i] <- raise f
             if indexes.Count = 0
             then Value(results)
@@ -175,7 +175,7 @@ type AsyncValBuilder () =
             match bound with
             | Value v -> return v
             | Async a -> return! a 
-            | Failure f -> return raise f })
+            | FailedWith f -> return raise f })
 
             
 [<AutoOpen>]
@@ -196,10 +196,10 @@ module AsyncExtensions =
             match v with
             | Value v -> async.Return v
             | Async a -> async.ReturnFrom a
-            | Failure f -> async.Return (raise f)
+            | FailedWith f -> async.Return (raise f)
 
         member x.Bind (v: AsyncVal<'T>, binder) =
             match v with
             | Value v -> async.Bind(async.Return v, binder)
             | Async a -> async.Bind(a, binder)
-            | Failure f -> async.Bind(async.Return (raise f), binder)
+            | FailedWith f -> async.Bind(async.Return (raise f), binder)
