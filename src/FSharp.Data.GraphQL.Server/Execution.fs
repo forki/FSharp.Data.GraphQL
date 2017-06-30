@@ -480,40 +480,62 @@ and buildObjectFields (fields: ExecutionInfo list) (objdef: ObjectDef) (ctx: Res
 type DefaultRequest =
     | SyncRequest of string * ResolveFieldContext * obj * (ResolveFieldContext -> obj -> obj)
     | AsyncRequest of string * ResolveFieldContext * obj * (ResolveFieldContext -> obj -> Async<obj>)
-    interface Request with
+    interface Request<obj> with
         member x.Identifier =
             match x with
             | SyncRequest(name, ctx, o, fn) -> sprintf "SyncRequest %s %A %s" name ctx.Args (if isNull o then "null" else o.GetHashCode().ToString())
             | AsyncRequest(name, ctx, o, fn) -> sprintf "SyncRequest %s %A %s" name ctx.Args (if isNull o then "null" else o.GetHashCode().ToString())
 
 /// Provides a datasource for all non-fetchable values
-type DefaultDataSource() =
-    interface DataSource<DefaultRequest> with
-        member x.Name = "__InternalGraphQLDataSource"
-        member x.FetchFn (blocked: BlockedFetch<DefaultRequest> list) =
-            blocked
-            |> List.map(fun b ->
-                match b.Request with
-                | SyncRequest(name, ctx, o, fn) ->
-                    async {
-                        try
-                            let res = fn ctx o
-                            do b.Status := FetchSuccess(res)
-                        with e ->
-                            do b.Status := FetchError e
-                    }
-                | AsyncRequest(name, ctx, o, fn) ->
-                    async {
-                        try
-                            let! res = fn ctx o
-                            do b.Status := FetchSuccess(res)
-                        with e ->
-                            do b.Status := FetchError e
-                    })
-            |> Async.Parallel
-            |> AsyncFetch
+let defaultSource =
+    let fetchFn (blocked: BlockedFetch<obj, DefaultRequest> list) =
+        blocked
+        |> List.map(fun b ->
+            match b.Request with
+            | SyncRequest(name, ctx, o, fn) ->
+                async {
+                    try
+                        let res = fn ctx o
+                        do FetchResult.putSuccess(b.Status) (res)
+                    with e ->
+                        do FetchResult.putFailure(b.Status) (e)
+                }
+            | AsyncRequest(name, ctx, o, fn) ->
+                async {
+                    try
+                        let! res = fn ctx o
+                        do FetchResult.putSuccess(b.Status) (res)
+                    with e ->
+                        do FetchResult.putFailure(b.Status) (e)
+                })
+        |> Async.Parallel
+        |> AsyncFetch
+    DataSource.create "__InternalGraphQLDataSource" fetchFn
+    // interface DataSource<DefaultRequest> with
+    //     member x.Name = "__InternalGraphQLDataSource"
+    //     member x.FetchFn (blocked: BlockedFetch<DefaultRequest> list) =
+    //         blocked
+    //         |> List.map(fun b ->
+    //             match b.Request with
+    //             | SyncRequest(name, ctx, o, fn) ->
+    //                 async {
+    //                     try
+    //                         let res = fn ctx o
+    //                         do b.Status := FetchSuccess(res)
+    //                     with e ->
+    //                         do b.Status := FetchError e
+    //                 }
+    //             | AsyncRequest(name, ctx, o, fn) ->
+    //                 async {
+    //                     try
+    //                         let! res = fn ctx o
+    //                         do b.Status := FetchSuccess(res)
+    //                     with e ->
+    //                         do b.Status := FetchError e
+    //                 })
+    //         |> Async.Parallel
+    //         |> AsyncFetch
 
-let defaultSource = DefaultDataSource()
 
 let internal compileSubscriptionField (subfield: SubscriptionFieldDef) = 
     match subfield.Resolve with

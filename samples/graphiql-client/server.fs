@@ -107,29 +107,28 @@ open FSharp.Data.Dataloader
 
 let schemaConfig = { SchemaConfig.Default with ParseError = (fun e -> e.Message + "\r\n" + e.StackTrace) }
 
-type TestRequest =
-    | HeroRequest of string
-    interface Request with
+type TestRequest<'a> =
+    | HeroRequest of string * (Human option -> 'a)
+    interface Request<'a> with
         member x.Identifier =
             match x with
-            | HeroRequest id -> sprintf "Hero id = " + id
+            | HeroRequest(id, _) -> sprintf "Hero id = " + id
 
-type TestDataSource () =
-    interface DataSource<TestRequest> with
-        member x.Name = "TestDataSource"
-        member x.FetchFn(blocked) =
-            blocked
-            |> List.map(fun b ->
-                match b.Request with
-                | HeroRequest id ->
-                    async {
-                        let res = getHuman id
-                        b.Status := FetchSuccess(box res)
-                    })
-            |> Async.Parallel
-            |> AsyncFetch
-let dataSource = TestDataSource()
-let getHero id = Fetch.dataFetch<Human option, TestRequest> dataSource (HeroRequest(id))
+let dataSource () =
+    let fetchfn (blocked: BlockedFetch<'a, TestRequest<'a>> list) =
+        blocked
+        |> List.map(fun b ->
+            match b.Request with
+            | HeroRequest(id, cont)->
+                async {
+                    let res = getHuman id
+                    do FetchResult.putSuccess (b.Status) (cont res)
+                })
+        |> Async.Parallel
+        |> AsyncFetch
+    DataSource.create "TestDataSource" fetchfn
+
+let getHero heroId = Fetch.dataFetch<Human option, TestRequest<_>> (dataSource()) (HeroRequest(heroId, id))
 
 let EpisodeType =
   Define.Enum(

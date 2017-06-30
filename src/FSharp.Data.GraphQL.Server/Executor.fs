@@ -54,7 +54,7 @@ type Executor<'Root> (schema: ISchema<'Root>) =
                 let errors = System.Collections.Concurrent.ConcurrentBag<exn>()
                 let rootObj = data |> Option.map box |> Option.toObj
                 let res = evaluate schema executionPlan variables rootObj errors fieldExecuteMap
-                return res |> Fetch.map(prepareOutput) |> Fetch.runFetch true
+                return res |> Fetch.map(prepareOutput) |> Fetch.runFetch false
             with 
             | ex -> 
                 let msg = ex.ToString()
