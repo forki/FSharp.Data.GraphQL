@@ -493,48 +493,24 @@ let defaultSource =
         |> List.map(fun b ->
             match b.Request with
             | SyncRequest(name, ctx, o, fn) ->
-                async {
-                    try
-                        let res = fn ctx o
-                        do FetchResult.putSuccess(b.Status) (res)
-                    with e ->
-                        do FetchResult.putFailure(b.Status) (e)
-                }
+                AsyncFetch(fun () -> 
+                    async {
+                        try
+                            let res = fn ctx o
+                            do FetchResult.putSuccess(b.Status) (res)
+                        with e ->
+                            do FetchResult.putFailure(b.Status) (e)
+                    })
             | AsyncRequest(name, ctx, o, fn) ->
-                async {
-                    try
-                        let! res = fn ctx o
-                        do FetchResult.putSuccess(b.Status) (res)
-                    with e ->
-                        do FetchResult.putFailure(b.Status) (e)
-                })
-        |> Async.Parallel
-        |> AsyncFetch
+                AsyncFetch(fun () ->
+                    async {
+                        try
+                            let! res = fn ctx o
+                            do FetchResult.putSuccess(b.Status) (res)
+                        with e ->
+                            do FetchResult.putFailure(b.Status) (e)
+                    }))
     DataSource.create "__InternalGraphQLDataSource" fetchFn
-    // interface DataSource<DefaultRequest> with
-    //     member x.Name = "__InternalGraphQLDataSource"
-    //     member x.FetchFn (blocked: BlockedFetch<DefaultRequest> list) =
-    //         blocked
-    //         |> List.map(fun b ->
-    //             match b.Request with
-    //             | SyncRequest(name, ctx, o, fn) ->
-    //                 async {
-    //                     try
-    //                         let res = fn ctx o
-    //                         do b.Status := FetchSuccess(res)
-    //                     with e ->
-    //                         do b.Status := FetchError e
-    //                 }
-    //             | AsyncRequest(name, ctx, o, fn) ->
-    //                 async {
-    //                     try
-    //                         let! res = fn ctx o
-    //                         do b.Status := FetchSuccess(res)
-    //                     with e ->
-    //                         do b.Status := FetchError e
-    //                 })
-    //         |> Async.Parallel
-    //         |> AsyncFetch
 
 
 let internal compileSubscriptionField (subfield: SubscriptionFieldDef) = 

@@ -120,12 +120,9 @@ let dataSource () =
         |> List.map(fun b ->
             match b.Request with
             | HeroRequest(id, cont)->
-                async {
+                SyncFetch(fun () ->
                     let res = getHuman id
-                    do FetchResult.putSuccess (b.Status) (cont res)
-                })
-        |> Async.Parallel
-        |> AsyncFetch
+                    do FetchResult.putSuccess (b.Status) (cont res)))
     DataSource.create "TestDataSource" fetchfn
 
 let getHero heroId = Fetch.dataFetch<Human option, TestRequest<_>> (dataSource()) (HeroRequest(heroId, id))
